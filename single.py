@@ -2,7 +2,6 @@ import time
 import csv
 import random
 import undetected_chromedriver as uc
-import atexit
 import concurrent.futures
 import requests
 from selenium import webdriver
@@ -14,14 +13,13 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException,
 def get_driver():
     options = uc.ChromeOptions()
     options.add_argument("--incognito")
-    options.add_argument("--headless")
+    # options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-blink-features=AutomationControlled")
     driver = uc.Chrome(options=options, use_subprocess=True)
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     driver.maximize_window()
-    atexit.register(driver.quit)
     return driver
 
 
