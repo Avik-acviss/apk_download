@@ -1,9 +1,9 @@
 import time
 import csv
 import random
-import concurrent.futures
 import requests
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -11,14 +11,20 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import List
 
 ############################################
 # Helper function to create Selenium driver
 ############################################
 def get_driver():
     print("[DEBUG] Initializing Chrome driver...")
-    chrome_driver_path = r"C:\Users\Acviss-ml\Downloads\chromedriver-win64\chromedriver-win64\chromedriver.exe"  # Update this path if needed
+    # UPDATE: Change this path to your local ChromeDriver path
+    chrome_driver_path = r"C:\Users\Acviss-ml\Downloads\chromedriver-win64\chromedriver-win64\chromedriver.exe"
     service = Service(chrome_driver_path)
 
     options = webdriver.ChromeOptions()
@@ -37,7 +43,7 @@ def get_driver():
     user_agents = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 6.1; WOW64; rv:54.0) Gecko/20100101 Firefox/54.0",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.128 Safari/537.36",
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.53 Safari/537.36"
     ]
@@ -145,28 +151,28 @@ def scrape_urls(driver, search_url, engine_name, no_of_pages, xpath, next_button
     return urls
 
 ############################################
-# Search engine scrapper functions
+# Search engine scraper functions
 ############################################
 def url_scrapper_google(product_name, no_of_pages):
     print("[INFO] Starting Google scraper...")
     driver = get_driver()
     search_url = f"https://www.google.com/search?q={product_name}&num=10"
     return scrape_urls(driver, search_url, "Google", no_of_pages,
-                       "//div[@class='yuRUbf']//a", "//span[contains(text(), 'Next')]")
+                         "//div[@class='yuRUbf']//a", "//span[contains(text(), 'Next')]")
 
 def url_scrapper_bing(product_name, no_of_pages):
     print("[INFO] Starting Bing scraper...")
     driver = get_driver()
     search_url = f"https://www.bing.com/search?q={product_name}"
     return scrape_urls(driver, search_url, "Bing", no_of_pages,
-                       "//li[@class='b_algo']//h2/a", "//a[@class='sb_pagN sb_pagN_bp b_widePag sb_bp ']")
+                         "//li[@class='b_algo']//h2/a", "//a[@class='sb_pagN sb_pagN_bp b_widePag sb_bp ']")
 
 def url_scrapper_yahoo(product_name, no_of_pages):
     print("[INFO] Starting Yahoo scraper...")
     driver = get_driver()
     search_url = f"https://in.search.yahoo.com/search?p={product_name}"
     return scrape_urls(driver, search_url, "Yahoo", no_of_pages,
-                       "//h3/a", "//a[@class='next' and contains(text(), 'Next')]")
+                         "//h3/a", "//a[@class='next' and contains(text(), 'Next')]")
 
 def url_scrapper_yandex(product_name, no_of_pages):
     print("[INFO] Starting Yandex scraper...")
@@ -183,97 +189,19 @@ def url_scrapper_yandex(product_name, no_of_pages):
             print("[WARNING] Manual CAPTCHA verification required on Yandex.")
             input("Press Enter after solving the CAPTCHA...")
     return scrape_urls(driver, search_url, "Yandex", no_of_pages,
-                       "//a[contains(@class,'organic__url')]",
-                       "//div[@class='Pager-ListItem Pager-ListItem_type_next']//a[@class='VanillaReact Pager-Item Pager-Item_type_next' and contains(text(), 'next')]")
+                         "//a[contains(@class,'organic__url')]",
+                         "//div[@class='Pager-ListItem Pager-ListItem_type_next']//a[@class='VanillaReact Pager-Item Pager-Item_type_next' and contains(text(), 'next')]")
 
 def url_scrapper_duckduckgo(product_name, no_of_pages):
     print("[INFO] Starting DuckDuckGo scraper...")
     driver = get_driver()
     search_url = f"https://duckduckgo.com/?q={product_name}&ia=web"
     return scrape_urls(driver, search_url, "DuckDuckGo", no_of_pages,
-                       "//div[@class='pAgARfGNTRe_uaK72TAD']//a",
-                       "//div[@class='rdxznaZygY2CryNa5yzk']//button[@id='more-results' and contains(text(), 'More results')]")
+                         "//div[@class='pAgARfGNTRe_uaK72TAD']//a",
+                         "//div[@class='rdxznaZygY2CryNa5yzk']//button[@id='more-results' and contains(text(), 'More results')]")
 
 ############################################
-# Save results to CSV
-############################################
-def save_to_csv(data, filename="search_results.csv"):
-    with open(filename, mode='w', newline='', encoding='utf-8') as file:
-        writer = csv.writer(file)
-        writer.writerow(["URL", "Search Engine"])
-        writer.writerows(data)
-    print(f"[INFO] Search results CSV saved successfully as {filename}")
-
-############################################
-# Main collection function to aggregate URLs
-############################################
-def main_collect():
-    product_name = input("Enter the product name to search: ")
-    google_pages = int(input("Enter the number of pages to search for Google: "))
-    bing_pages = int(input("Enter the number of pages to search for Bing: "))
-    yahoo_pages = int(input("Enter the number of pages to search for Yahoo: "))
-    yandex_pages = int(input("Enter the number of pages to search for Yandex: "))
-    duckduckgo_pages = int(input("Enter the number of pages to search for DuckDuckGo: "))
-    all_results = []
-    all_results.extend(url_scrapper_google(product_name, google_pages))
-    all_results.extend(url_scrapper_bing(product_name, bing_pages))
-    all_results.extend(url_scrapper_yahoo(product_name, yahoo_pages))
-    all_results.extend(url_scrapper_yandex(product_name, yandex_pages))
-    all_results.extend(url_scrapper_duckduckgo(product_name, duckduckgo_pages))
-    save_to_csv(all_results)
-    print("[INFO] URL collection complete.")
-
-############################################
-# Second-stage normal driver for details scrape
-############################################
-def get_normal_driver():
-    print("[DEBUG] Initializing normal Chrome driver for details scrape...")
-    chrome_driver_path = r"C:\Users\Acviss-ml\Downloads\chromedriver-win64\chromedriver-win64\chromedriver.exe"  # Update this path if needed
-    service = Service(chrome_driver_path)
-
-    options = webdriver.ChromeOptions()
-    options.add_argument("--headless=new")
-    options.add_argument("--incognito")
-    options.add_argument("--start-maximized")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument("--window-size=1920,1080")
-    # --- FRESH PROFILE EACH RUN ---
-    temp_profile = tempfile.mkdtemp()
-    options.add_argument(f"--user-data-dir={temp_profile}")
-
-    user_agents = [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 6.1; WOW64; rv:54.0) Gecko/20100101 Firefox/54.0",
-        "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.128 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.53 Safari/537.36"
-    ]
-    chosen_agent = random.choice(user_agents)
-    print(f"[DEBUG] Using user agent for details scrape: {chosen_agent}")
-    options.add_argument(f"user-agent={chosen_agent}")
-    driver = webdriver.Chrome(service=service, options=options)
-    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-    driver.maximize_window()
-    print("[DEBUG] Normal Chrome driver launched successfully for details scraping.")
-    return driver
-
-############################################
-# Get HTTP response code with timeout
-############################################
-def get_response_code(url):
-    try:
-        print(f"[DEBUG] Checking HTTP response for URL: {url}")
-        response = requests.get(url, timeout=10)
-        return response.status_code
-    except requests.exceptions.RequestException:
-        print(f"[WARNING] Request failed for URL: {url}")
-        return None
-
-############################################
-# Details scraper, checking for download buttons
+# Helper functions for download checks
 ############################################
 def handle_popups(driver):
     try:
@@ -341,7 +269,7 @@ def check_for_download_button(driver):
         "//a[contains(@class, 'buttonDownload') and contains(@href, 'com-facebook-katana/download')]",
         "(//a[contains(@class, 'dllink') and contains(@href, 'download.it/android/download')])[1]",
         "(//a[contains(@class, 'accent_color') and contains(@href, 'android-apk-download')])[1]",
-        "(//div[@class='table-cell rowheight addseparator expand pad dowrap-break-all']/a[@class='accent_color' and contains(@href, '/apk/facebook-2/facebook/variant-')])[1]",
+        "(//div[@class='table-cell rowheight addseparator expand pad dowrap-break-all']/a[@class='accent_color' and contains(@href, 'facebook-2/facebook/variant-')])[1]",
         "(//div[@class='table-cell rowheight addseparator expand pad dowrap-break-all']/a[@class='accent_color']/@href)[1]",
         "(//div[@class='table-cell rowheight addseparator expand pad dowrap-break-all']/span[contains(@class, 'apkm-badge')][1]/text())[1]",
         "(//div[contains(@class,'table-cell')]/a[@class='accent_color']/@href)[1]",
@@ -357,17 +285,7 @@ def check_for_download_button(driver):
         "//a[@href='https://r-static-assets.androidapks.com/rdata/f75e7ee31abb959a483952171c0e0b28/com.facebook.katana_v476.0.0.49.74-454214857_Android-8.0.apk' and contains(@class, 'wp-block-button__link') and strong[text()='Скачать']]",
         "//a[@href='/get-24837-facebook.html' and contains(@class, 'btn-download') and contains(normalize-space(), 'СКАЧАТЬ')]",
         "//a[@class='btn btn-dl' and @href='/download/com.facebook.katana/fa370b1827feccd7f882fb19ee36d688/' and @title='download Facebook APK now']",
-        "//a[@href='https://file.apkdone.io/s/8f6XqcFn4om7WGJ/download' and @title='Download Facebook 436.0.0.0.28' and contains(@class, 'version-download-btn')]",
-        "//a[@href='https://apkpure.tools/ru/facebook/com.facebook.katana/download' and contains(., 'Скачать APK')]",
-        "//a[@href='https://apkpure.ph/ru/facebook/com.facebook.katana/download' and contains(., 'Скачать APK')]",
-        "//img[@src='https://androidapksfree.com/wp-content/uploads/2014/11/Facebook-APK-1-85x85.png' and @alt='Facebook 507.0.0.66.49 APK']",
-        "(//h5[@class='appRowTitle wrapText marginZero block-on-mobile']/a[@class='fontBlack'])[1]",
-        "(//a[@class='accent_color' and contains(@href, 'facebook-434-0-0-36-115')])[1]",
-        "//a[@class='button last' and contains(@href, 'facebook.fr.uptodown.com/android/telecharger')]",
-        "(//a[@class='fontBlack' and contains(@href, '/apk/facebook-2/facebook/facebook-293-0-0-43-120-release')])[1]",
-        "//div[@class='download-button__DownloadContainer-sc-18tslsf-0 iupaOQ']//div[@class='gradient-button__AppStoreDownload-sc-1troloh-3 cCqocC track-download-button' and text()='Descargar']",
-        "(//h5[@class='appRowTitle wrapText marginZero block-on-mobile']/a[@class='fontBlack' and contains(text(), 'Facebook 451.0.0.45.109')])[1]",
-        "//a[@class='button last' and @href='https://facebook.uptodown.com/android/descargar']",
+        "//a[@href='https://facebook.uptodown.com/android/descargar']",
         "(//div[@class='table-cell rowheight addseparator expand pad dowrap-break-all']//a[@class='accent_color' and contains(@href, 'facebook-435-0-0-42-112')])[1]",
         "(//div[@class='table-cell rowheight addseparator expand pad dowrap-break-all']//a[@class='accent_color' and contains(@href, 'facebook-301-0-0-0-54')])[1]",
         "(//a[@class='fontBlack' and contains(@href, 'facebook-508-0-0-50-47')])[1]",
@@ -378,7 +296,6 @@ def check_for_download_button(driver):
         "//a[@class='dwn1' and contains(@href, 'apk.watch/download')]",
         "//a[@class='dit-dlbtn dllink mb-3 w-100 text-left align-left btn btn-lg btn-block  download_link' and contains(@href, 'cloudfront.net')]",
         "//img[@alt='Facebook 507.0.0.66.49 APK']"
-
     ]
     for xpath in download_button_xpaths:
         try:
@@ -441,9 +358,7 @@ def check_download_on_url(url, engine_name):
         except:
             pass
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
-def process_all_urls_concurrently(url_rows, max_workers=6):
+def process_all_urls_concurrently(url_rows, max_workers=5):
     results = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_row = {executor.submit(check_download_on_url, row["URL"], row["Search Engine"]): row for row in url_rows}
@@ -459,34 +374,87 @@ def process_all_urls_concurrently(url_rows, max_workers=6):
                     })
             except Exception as exc:
                 print(f"[ERROR] {row['URL']} generated an exception: {exc}")
-                # Don't save if there's an error or no button
     return results
 
+############################################
+# FastAPI Application Setup
+############################################
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import List
 
-def process_csv_downloads_concurrent(input_csv="search_results.csv", output_csv="download_results.csv"):
-    url_rows = []
-    with open(input_csv, mode='r', encoding='utf-8') as file:
-        reader = csv.DictReader(file)
-        for row in reader:
-            url_rows.append(row)
+app = FastAPI(
+    title="Scraping and Download Check API",
+    description="API to scrape URLs and optionally check for download buttons using Selenium.",
+    version="1.0"
+)
 
-    # Process URL checks concurrently
-    results = process_all_urls_concurrently(url_rows, max_workers=6)
+class ScrapeRequest(BaseModel):
+    product_name: str
+    google_pages: int = 1
+    bing_pages: int = 1
+    yahoo_pages: int = 1
+    yandex_pages: int = 1
+    duckduckgo_pages: int = 1
+    check_download_buttons: bool = True # <-- NEW toggle flag
 
-    if results:
-        with open(output_csv, mode='w', newline='', encoding='utf-8') as file:
-            fieldnames = ["URL", "Download Button", "Search Engine"]
-            writer = csv.DictWriter(file, fieldnames=fieldnames)
-            writer.writeheader()
-            for res in results:
-                writer.writerow(res)
-        print(f"[INFO] CSV saved with {len(results)} URLs that have download buttons.")
+class ScrapeResult(BaseModel):
+    URL: str
+    SearchEngine: str
+    Download_Button: str | None = None  # Optional, appears only if checking is enabled
+
+@app.post("/scrape", response_model=List[ScrapeResult])
+def scrape(request: ScrapeRequest):
+    print("[DEBUG] Scrape endpoint triggered")
+    all_results = []
+    try:
+        all_results.extend(url_scrapper_google(request.product_name, request.google_pages))
+        all_results.extend(url_scrapper_bing(request.product_name, request.bing_pages))
+        all_results.extend(url_scrapper_yahoo(request.product_name, request.yahoo_pages))
+        all_results.extend(url_scrapper_yandex(request.product_name, request.yandex_pages))
+        all_results.extend(url_scrapper_duckduckgo(request.product_name, request.duckduckgo_pages))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    url_rows = [{"URL": url, "Search Engine": engine} for (url, engine) in all_results]
+
+    if request.check_download_buttons:
+        download_results = process_all_urls_concurrently(url_rows, max_workers=5)
+
+        if download_results:  # ✅ Only save if something was found
+            with open("static/output_downloads.csv", "w", newline="", encoding="utf-8") as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(["URL", "SearchEngine", "Download_Button"])
+                for res in download_results:
+                    writer.writerow([res["URL"], res["Search Engine"], res["Download Button"]])
+
+        return [
+            {
+                "URL": res["URL"],
+                "SearchEngine": res["Search Engine"],
+                "Download_Button": res["Download Button"]
+            } for res in download_results
+        ]
+
     else:
-        print("[INFO] No download buttons found — CSV not created.")
+        # Always save URL list for raw scrape
+        with open("output.csv", "w", newline="", encoding="utf-8") as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(["URL", "SearchEngine"])
+            for row in url_rows:
+                writer.writerow([row["URL"], row["Search Engine"]])
 
-############################################
-# Main execution: Run both sections sequentially
-############################################
-if __name__ == "__main__":
-    main_collect()
-    process_csv_downloads_concurrent()
+        return [
+            {
+                "URL": row["URL"],
+                "SearchEngine": row["Search Engine"]
+            } for row in url_rows
+        ]
+
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+@app.get("/", response_class=FileResponse)
+def serve_ui():
+    return "static/index.html"

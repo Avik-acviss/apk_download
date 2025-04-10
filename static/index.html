@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Scraping & Download Check API</title>
+  <!-- Bootstrap 5 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <style>
+    body {
+      background: #f8f9fa;
+    }
+    .card {
+      margin-top: 50px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .spinner-border {
+      width: 1.5rem;
+      height: 1.5rem;
+    }
+    .footer {
+      margin-top: 30px;
+      text-align: center;
+      font-size: 0.9rem;
+      color: #6c757d;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header Section -->
+    <div class="text-center my-4">
+      <h1>Scraping & Download Check API</h1>
+      <p class="lead">Empowering product authenticity with cutting‑edge digital verification.</p>
+    </div>
+
+    <!-- Form Card -->
+    <div class="card">
+      <div class="card-header">
+        <h4>Enter Your Scraping Parameters</h4>
+      </div>
+      <div class="card-body">
+        <form id="scrapeForm">
+          <div class="row g-3">
+            <div class="col-md-12">
+              <label for="product_name" class="form-label">Product Name</label>
+              <input type="text" class="form-control" id="product_name" placeholder="Enter product or query" required />
+            </div>
+            <div class="col-md-4">
+              <label for="google_pages" class="form-label">Google Pages</label>
+              <input type="number" class="form-control" id="google_pages" value="1" min="1" />
+            </div>
+            <div class="col-md-4">
+              <label for="bing_pages" class="form-label">Bing Pages</label>
+              <input type="number" class="form-control" id="bing_pages" value="1" min="1" />
+            </div>
+            <div class="col-md-4">
+              <label for="yahoo_pages" class="form-label">Yahoo Pages</label>
+              <input type="number" class="form-control" id="yahoo_pages" value="1" min="1" />
+            </div>
+            <div class="col-md-6">
+              <label for="yandex_pages" class="form-label">Yandex Pages</label>
+              <input type="number" class="form-control" id="yandex_pages" value="1" min="1" />
+            </div>
+            <div class="col-md-6">
+              <label for="duckduckgo_pages" class="form-label">DuckDuckGo Pages</label>
+              <input type="number" class="form-control" id="duckduckgo_pages" value="1" min="1" />
+            </div>
+            <div class="col-md-12 form-check mt-3">
+              <input type="checkbox" class="form-check-input" id="check_download_buttons" checked />
+              <label class="form-check-label" for="check_download_buttons">Check for Download Buttons</label>
+            </div>
+          </div>
+          <div class="mt-4">
+            <button type="submit" class="btn btn-primary">Scrape</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Results Section -->
+    <div class="card mt-4">
+      <div class="card-header">
+        <h4>Results</h4>
+      </div>
+      <div class="card-body">
+        <div id="results"></div>
+        <div id="downloadSection" class="mt-4 d-none">
+          <a id="csvDownloadBtn" href="#" class="btn btn-success" download>Download CSV</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      &copy; 2025 Acviss. Enhancing transparency in digital authentication.
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    document.getElementById("scrapeForm").addEventListener("submit", function (event) {
+      event.preventDefault();
+      const resultsDiv = document.getElementById("results");
+      const downloadSection = document.getElementById("downloadSection");
+      resultsDiv.innerHTML = `
+        <div class="d-flex align-items-center">
+          <strong class="me-2">Scraping in progress...</strong>
+          <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+        </div>
+      `;
+      downloadSection.classList.add("d-none");
+
+      const data = {
+        product_name: document.getElementById("product_name").value,
+        google_pages: Number(document.getElementById("google_pages").value),
+        bing_pages: Number(document.getElementById("bing_pages").value),
+        yahoo_pages: Number(document.getElementById("yahoo_pages").value),
+        yandex_pages: Number(document.getElementById("yandex_pages").value),
+        duckduckgo_pages: Number(document.getElementById("duckduckgo_pages").value),
+        check_download_buttons: document.getElementById("check_download_buttons").checked
+      };
+
+      fetch("/scrape", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data)
+      })
+        .then((response) => {
+          if (!response.ok) throw new Error("Network response was not ok " + response.statusText);
+          return response.json();
+        })
+        .then((results) => {
+          if (!results || results.length === 0) {
+            resultsDiv.innerHTML = "<p>No results were found.</p>";
+            return;
+          }
+
+          let tableHtml = "<table class='table table-striped table-bordered'>";
+          tableHtml += "<thead><tr><th>URL</th><th>Search Engine</th>";
+          if (results[0].Download_Button !== undefined) {
+            tableHtml += "<th>Download Button</th>";
+          }
+          tableHtml += "</tr></thead><tbody>";
+
+          results.forEach((item) => {
+            tableHtml += "<tr>";
+            tableHtml += `<td><a href="${item.URL}" target="_blank">${item.URL}</a></td>`;
+            tableHtml += `<td>${item.SearchEngine}</td>`;
+            if (item.Download_Button !== undefined) {
+              tableHtml += `<td>${item.Download_Button}</td>`;
+            }
+            tableHtml += "</tr>";
+          });
+
+          tableHtml += "</tbody></table>";
+          resultsDiv.innerHTML = tableHtml;
+
+          const csvFile = data.check_download_buttons ? "/static/output_downloads.csv" : "/static/output.csv";
+          const csvBtn = document.getElementById("csvDownloadBtn");
+          csvBtn.setAttribute("href", csvFile);
+          downloadSection.classList.remove("d-none");
+        })
+        .catch((error) => {
+          resultsDiv.innerHTML = "<p class='text-danger'>An error occurred: " + error.message + "</p>";
+        });
+    });
+  </script>
+</body>
+</html>
